@@ -27,16 +27,17 @@ def get_language_comment_pattern(filename):
     languages = {'.py': ('python', r'#(.*)'),}  # removed others for clarity
     return languages.get(ext, (None, None))
 
-def extract_comments_and_defs(filename, comment_pattern, def_pattern):
+def extract_comments_and_defs(filename, comment_pattern, def_pattern, import_pattern):  # Add import_pattern
     try:
         with open(filename, 'r') as f:
             contents = f.read()
         comments = re.findall(comment_pattern, contents)
         defs = re.findall(def_pattern, contents)
-        return [comment.strip() for comment in comments], [def_.strip() for def_ in defs]
+        imports = re.findall(import_pattern, contents)  # Find all matches to import_pattern
+        return [comment.strip() for comment in comments], [def_.strip() for def_ in defs], list(set(imports))  # Add imports to return statement
     except Exception as e:
         print(f"Failed to extract comments and functions from {filename}: {e}")
-        return [], []
+        return [], [], []  # Add an empty list for imports
 
 def contains_source_code(directory):
     source_code_exts = ['.py', '.js', '.c', '.cpp', '.java', '.rb', '.go', '.php']
@@ -46,9 +47,12 @@ def contains_source_code(directory):
     return False
 
 def get_newest_oldest_files(directory):
-    files = get_files(directory)
-    newest_file = max(files, key=os.path.getmtime)
-    oldest_file = min(files, key=os.path.getmtime)
+    python_files = [file for file in get_files(directory) if file.endswith('.py')]
+    if not python_files:
+        return None, None
+    
+    newest_file = max(python_files, key=os.path.getmtime)
+    oldest_file = min(python_files, key=os.path.getmtime)
     return newest_file, oldest_file
 
 def create_directory_structure(directory):
@@ -62,6 +66,14 @@ def create_directory_structure(directory):
                 directory_structure += f"[File] -> {name}\n"
     return directory_structure
 
+def count_lines_in_file(filename):
+    _, ext = os.path.splitext(filename)
+    if ext == '.py':
+        with open(filename, 'r') as f:
+            return sum(1 for line in f)
+    else:
+        return None
+
 def process_directory(directory):
     if ".git" not in os.listdir(directory):
         return 
@@ -73,7 +85,8 @@ def process_directory(directory):
         return
 
     all_comments = []
-    all_defs = []  # Declaration of all_defs
+    all_defs = []
+    all_imports = []  # Declare all_imports
     for file in python_files:
         language, comment_pattern = get_language_comment_pattern(file)
         if comment_pattern is None:  
@@ -81,37 +94,43 @@ def process_directory(directory):
             
         comment_pattern = r'#(.*)'
         def_pattern = r'def (\w+)\(.*\):'
-        comments, defs = extract_comments_and_defs(file, comment_pattern, def_pattern)
+        import_pattern = r'(?:import|from) (\w+)'  # Declare import_pattern
+        comments, defs, imports = extract_comments_and_defs(file, comment_pattern, def_pattern, import_pattern)  # Update function call
         all_comments.extend(comments)
-        all_defs.extend(defs[:])  # lets pull the last 20 function definitions for brevity
+        all_defs.extend(defs[:]) 
+        all_imports.extend(imports)  # Extend all_imports with imports from file
 
     newest_file, oldest_file = get_newest_oldest_files(directory)
     directory_structure = create_directory_structure(directory)
-    write_prompt(all_comments[:100], all_defs, directory, language, newest_file, oldest_file, directory_structure)        
+    write_prompt(all_comments[:100], all_defs, all_imports, directory, language, newest_file, oldest_file, directory_structure)  # Add all_imports to function call      
 
-def write_prompt(comments, defs, directory, language, newest_file, oldest_file, directory_structure):
+def write_prompt(comments, defs, imports, directory, language, newest_file, oldest_file, directory_structure): 
     try:
         global file_count  # Declare file_count as a global variable
 
         with open(os.path.join(directory, 'chatgpt_prompt.txt'), 'w') as f:
-            f.write(f'The newest file was created on {datetime.fromtimestamp(os.path.getmtime(newest_file)).strftime("%Y-%m-%d %H:%M:%S")}\n')
-            f.write(f'The newest file is titled {os.path.basename(newest_file)}\n')
-            f.write(f'The oldest file was created on {datetime.fromtimestamp(os.path.getmtime(oldest_file)).strftime("%Y-%m-%d %H:%M:%S")}\n')
-            f.write(f'The oldest file is titled {os.path.basename(oldest_file)}\n')
-            f.write(f'This directory structure appears to be: {language}\n')
-            f.write(f'It has {len(get_files(directory))} files in it.\n')
-            f.write(f'### Here are up to 100 comments pulled from the Python files:\n')
+            f.write(f'### Here is the root directory structure:\n')
+            f.write(directory_structure + '\n')
+            newest_file_lines = count_lines_in_file(newest_file)
+            oldest_file_lines = count_lines_in_file(oldest_file)            
+            f.write(f'The newest file, titled "{os.path.basename(newest_file)}", was created on {datetime.fromtimestamp(os.path.getmtime(newest_file)).strftime("%Y-%m-%d %H:%M:%S")} and has {newest_file_lines} lines.\n')
+            f.write(f'The oldest file, titled "{os.path.basename(oldest_file)}", was created on {datetime.fromtimestamp(os.path.getmtime(oldest_file)).strftime("%Y-%m-%d %H:%M:%S")} and has {oldest_file_lines} lines.\n')
+            # write the imports blocks
+            f.write(f'\n### Here are the unique imports detected in the Python files:\n')
+            if imports:
+                f.write('\n'.join(imports))
+            else:
+                f.write('No import statements found in any Python files.')
+            f.write(f'\n### Here are up to 100 comments pulled from the Python files:\n')
             if comments:
                 f.write('\n'.join(comments))
             else:
                 f.write('No comments found in any Python files.')
-            f.write(f'\n### Here are up to 20 function definitions pulled from the Python files:\n')
+            f.write(f'\n\n### Here are up to 20 function definitions pulled from the Python files:\n')
             if defs:
                 f.write('\n'.join(defs))
             else:
                 f.write('No function definitions found in any Python files.')
-            f.write(f'### Here is the root directory structure:\n')
-            f.write(directory_structure + '\n')
         
         print(f"Processed directory {directory} successfully.")
         processed_directories.append(os.path.join(directory, 'chatgpt_prompt.txt'))  
