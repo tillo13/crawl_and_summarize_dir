@@ -76,9 +76,18 @@ def count_lines_in_file(filename):
 
 def process_directory(directory):
     if ".git" not in os.listdir(directory):
-        return 
+        return
     if not contains_source_code(directory):
         return
+
+    # Count total number of files and sub-directories
+    total_files = 0
+    total_dirs = 0
+    total_py_files = 0   # Total number of Python files
+    for base_dir, dirs, files in os.walk(directory):
+        total_files += len(files)
+        total_dirs += len(dirs)
+        total_py_files += len([f for f in files if f.endswith('.py')])  # Count Python files
 
     python_files = [file for file in get_files(directory) if file.endswith('.py')]
     if not python_files:
@@ -89,7 +98,7 @@ def process_directory(directory):
     all_imports = []  # Declare all_imports
     for file in python_files:
         language, comment_pattern = get_language_comment_pattern(file)
-        if comment_pattern is None:  
+        if comment_pattern is None:
             continue
             
         comment_pattern = r'#(.*)'
@@ -97,20 +106,29 @@ def process_directory(directory):
         import_pattern = r'(?:import|from) (\w+)'  # Declare import_pattern
         comments, defs, imports = extract_comments_and_defs(file, comment_pattern, def_pattern, import_pattern)  # Update function call
         all_comments.extend(comments)
-        all_defs.extend(defs[:]) 
+        all_defs.extend(defs) 
         all_imports.extend(imports)  # Extend all_imports with imports from file
 
     newest_file, oldest_file = get_newest_oldest_files(directory)
+    
+    root_folder_name = os.path.basename(directory)  # Here get the root folder name
     directory_structure = create_directory_structure(directory)
-    write_prompt(all_comments[:100], all_defs, all_imports, directory, language, newest_file, oldest_file, directory_structure)  # Add all_imports to function call      
 
-def write_prompt(comments, defs, imports, directory, language, newest_file, oldest_file, directory_structure): 
+    all_imports = list(dict.fromkeys(all_imports))  # Remove duplicates from imports
+    all_defs = list(dict.fromkeys(all_defs))  # Remove duplicates from function definitions
+    
+    write_prompt(all_comments[:100], all_defs, all_imports, directory, language, newest_file, oldest_file, directory_structure, total_files, total_dirs, total_py_files, root_folder_name)    
+def write_prompt(comments, defs, imports, directory, language, newest_file, oldest_file, directory_structure, total_files, total_dirs, total_py_files, root_folder_name):  # Add new parameters
     try:
         global file_count  # Declare file_count as a global variable
 
         with open(os.path.join(directory, 'chatgpt_prompt.txt'), 'w') as f:
+            f.write(f'### Name of Root Folder: {root_folder_name}\n')
             f.write(f'### Here is the root directory structure:\n')
             f.write(directory_structure + '\n')
+            f.write(f'### Total number of files: {total_files}\n')  # Write total_files
+            f.write(f'### Total number of sub-directories: {total_dirs}\n')  # Write total_dirs
+            f.write(f'### Total number of .py files: {total_py_files}\n')  # Write total_py_files
             newest_file_lines = count_lines_in_file(newest_file)
             oldest_file_lines = count_lines_in_file(oldest_file)            
             f.write(f'The newest file, titled "{os.path.basename(newest_file)}", was created on {datetime.fromtimestamp(os.path.getmtime(newest_file)).strftime("%Y-%m-%d %H:%M:%S")} and has {newest_file_lines} lines.\n')
