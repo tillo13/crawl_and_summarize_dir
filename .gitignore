@@ -13,3 +13,4 @@ logs
 **/test*
 **/_
 **/chatgpt_prompt.txt
+**/chatgpt_response.json
